@@ -673,6 +673,15 @@ def setup_avd():
         error("live_setup.sh failed!")
 
 
+def patch_init_rc():
+    header("* Patch init.rc")
+
+    push_files(Path("scripts", "patch_init.sh"))
+
+    proc = execv([adb_path, "shell", "sh", "/data/local/tmp/patch_init.sh"])
+    if proc.returncode != 0:
+        error("patch_init.sh failed!")
+
 def patch_avd_file():
     input = Path(args.image)
     output = Path(args.output)
@@ -845,6 +854,11 @@ def parse_args():
         "-b", "--build", action="store_true", help="build before patching"
     )
 
+    system_parser = subparsers.add_parser("system", help="patch init.rc in system partition")
+    system_parser.add_argument(
+        "-b", "--build", action="store_true", help="build before patching"
+    )
+
     avd_patch_parser = subparsers.add_parser(
         "avd_patch", help="patch AVD ramdisk.img or init_boot.img"
     )
@@ -890,6 +904,7 @@ def parse_args():
     stub_parser.set_defaults(func=build_stub)
     test_parser.set_defaults(func=build_test)
     emu_parser.set_defaults(func=setup_avd)
+    system_parser.set_defaults(func=patch_init_rc)
     avd_patch_parser.set_defaults(func=patch_avd_file)
     clean_parser.set_defaults(func=cleanup)
     ndk_parser.set_defaults(func=setup_ndk)
