@@ -1,6 +1,7 @@
 package com.topjohnwu.magisk.test
 
 import android.os.ParcelFileDescriptor.AutoCloseInputStream
+import android.util.Log
 import androidx.annotation.Keep
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
@@ -27,6 +28,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.BeforeClass
 import org.junit.Test
 import org.junit.runner.RunWith
+import timber.log.Timber
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -46,7 +48,7 @@ class AdditionalTest : BaseTest {
         fun before() {
             BaseTest.prerequisite()
             runBlocking {
-                RootUtils.fs.getFile("/data/adb").list()
+                Timber.d(RootUtils.fs.getFile("/data/adb").list()?.joinToString())
                 modules = LocalModule.installed()
             }
         }

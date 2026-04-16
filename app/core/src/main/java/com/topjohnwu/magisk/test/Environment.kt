@@ -306,7 +306,7 @@ class Environment : BaseTest {
         setupRemoveModule(root)
         setupUpgradeModule(root, update)
         runBlocking {
-            RootUtils.fs.getFile("/data/adb/modules_update").list()
+            Timber.d(RootUtils.fs.getFile("/data/adb/modules_update").list()?.joinToString())
         }
     }
 
