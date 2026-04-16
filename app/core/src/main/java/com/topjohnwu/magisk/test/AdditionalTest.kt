@@ -46,6 +46,7 @@ class AdditionalTest : BaseTest {
         fun before() {
             BaseTest.prerequisite()
             runBlocking {
+                RootUtils.fs.getFile("/data/adb").list()
                 modules = LocalModule.installed()
             }
         }

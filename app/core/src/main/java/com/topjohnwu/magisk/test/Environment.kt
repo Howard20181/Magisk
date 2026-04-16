@@ -305,6 +305,9 @@ class Environment : BaseTest {
         setupInvalidZygiskModule(update)
         setupRemoveModule(root)
         setupUpgradeModule(root, update)
+        runBlocking {
+            RootUtils.fs.getFile("/data/adb/modules_update").list()
+        }
     }
 
     @Test
