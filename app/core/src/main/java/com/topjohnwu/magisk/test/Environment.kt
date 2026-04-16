@@ -253,6 +253,10 @@ class Environment : BaseTest {
                 "Magisk setup failed",
                 MagiskInstaller.Emulator(TimberLog, TimberLog).exec()
             )
+            assertTrue(
+                "/data/adb not exists",
+                RootUtils.fs.getFile("/data/adb").exists()
+            )
         }
 
         val notify = object : DownloadNotifier {
