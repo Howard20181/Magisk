@@ -4,7 +4,7 @@ use base::nix::fcntl::OFlag;
 use base::nix::unistd::UnlinkatFlags;
 use base::{
     BufReadExt, Directory, FsPathBuilder, LoggedResult, ResultExt, Utf8CStr, Utf8CString,
-    clone_attr, cstr, debug, fclone_attr, xfork,
+    clone_attr, cstr, debug, fclone_attr, warn, xfork,
     const_format::concatcp,
 };
 use std::fs::File;
@@ -262,77 +262,133 @@ impl MagiskInit {
     }
 
     pub(crate) fn load_overlay_rc(&mut self, overlay: &Utf8CStr, module_path: &Utf8CStr) {
-        if let Ok(mut dir) = Directory::open(overlay) {
-            let init_rc = cstr::buf::dynamic(256)
-                .join_path(overlay)
-                .join_path("init.rc");
-            if init_rc.exists() {
+        debug!(
+            "load_overlay_rc: overlay=[{}] module_path=[{}]",
+            overlay,
+            module_path
+        );
+        let mut dir = match Directory::open(overlay) {
+            Ok(dir) => dir,
+            Err(e) => {
+                warn!("load_overlay_rc: cannot open [{}]: {}", overlay, e);
+                return;
+            }
+        };
+        let is_module_overlay = !module_path.is_empty();
+
+        let init_rc = cstr::buf::dynamic(256)
+            .join_path(overlay)
+            .join_path("init.rc");
+        if init_rc.exists() {
+            if is_module_overlay {
+                debug!("load_overlay_rc: keep module init_rc [{}]", init_rc);
+            } else {
                 // Do not allow overwrite init.rc
                 init_rc.remove().log_ok();
             }
-            loop {
-                match dir.read() {
-                    Ok(None) => break,
-                    Ok(Some(e)) => {
-                        let recursive = cstr::buf::dynamic(256)
-                            .join_path(module_path)
-                            .exists();
-                        if (recursive && e.is_dir()) || e.is_file() {
-                            let buf = &mut cstr::buf::dynamic(256);
-                            e.resolve_path(buf).log_ok();
-                            if e.is_file() && buf.ends_with(".rc") {
-                                let mut path;
-                                if recursive {
-                                    let stripped = buf.as_str()
-                                        .strip_prefix(module_path.as_str())
-                                        .unwrap_or(buf.as_str());
-                                    path = cstr::buf::dynamic(256).join_path(stripped);
-                                } else {
-                                    path = cstr::buf::dynamic(256)
-                                        .join_path("/")
-                                        .join_path(e.name());
-                                }
-                                if path.exists() {
-                                    debug!("Replace rc script [{}] -> [{}]", path, buf);
-                                } else {
-                                    path = cstr::buf::dynamic(256).join_path(buf);
-                                    debug!("Found rc script [{}]", path);
-                                    let mut rc_content = String::new();
-                                    if let Ok(mut file) = path.open(OFlag::O_RDONLY | OFlag::O_CLOEXEC) {
+        }
+        loop {
+            match dir.read() {
+                Ok(None) => break,
+                Ok(Some(e)) => {
+                    if e.is_file() {
+                        let buf = &mut cstr::buf::dynamic(256);
+                        e.resolve_path(buf).log_ok();
+                        if buf.ends_with(".rc") {
+                            let mut path;
+                            if is_module_overlay {
+                                let stripped = buf
+                                    .as_str()
+                                    .strip_prefix(module_path.as_str())
+                                    .unwrap_or(buf.as_str());
+                                path = cstr::buf::dynamic(256).join_path(stripped);
+                                debug!("Recursive rc stripped path [{}] from [{}]", path, buf);
+                            } else {
+                                path = cstr::buf::dynamic(256)
+                                    .join_path("/")
+                                    .join_path(e.name());
+                            }
+                            if path.exists() {
+                                debug!("Replace rc script [{}] -> [{}]", path, buf);
+                            } else {
+                                path = cstr::buf::dynamic(256).join_path(buf);
+                                debug!("Found rc script [{}]", path);
+                                let mut rc_content = String::new();
+                                match path.open(OFlag::O_RDONLY | OFlag::O_CLOEXEC) {
+                                    Ok(mut file) => {
                                         file.read_to_string(&mut rc_content).log_ok();
                                         self.rc_list.push(rc_content);
                                         drop(file);
-                                        path.remove().log_ok();
+                                        if is_module_overlay {
+                                            debug!("load_overlay_rc: keep readonly module rc [{}]", path);
+                                        } else {
+                                            path.remove().log_ok();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("load_overlay_rc: cannot read [{}]: {}", path, e);
                                     }
                                 }
-                            } else if e.is_dir() {
-                                self.load_overlay_rc(buf, module_path);
                             }
-                        } else {
-                            continue;
+                        }
+                    } else if e.is_dir() {
+                        let should_recurse = cstr::buf::dynamic(256).join_path(module_path).exists();
+                        if should_recurse {
+                            let buf = &mut cstr::buf::dynamic(256);
+                            e.resolve_path(buf).log_ok();
+                            debug!("load_overlay_rc: recurse into [{}]", buf);
+                            self.load_overlay_rc(buf, module_path);
                         }
                     }
-                    Err(_) => break,
+                }
+                Err(e) => {
+                    warn!("load_overlay_rc: read dir [{}] failed: {}", overlay, e);
+                    break;
                 }
             }
         }
     }
 
     pub(crate) fn handle_modules_rc(&mut self, root_dir: &Utf8CStr) {
-        if let Ok(mut dir) = Directory::open(cstr!(concatcp!("/data/", PREINITMIRR))) {
-            loop {
-                match dir.read() {
-                    Ok(None) => break,
-                    Ok(Some(e)) if e.is_dir() => {
-                        let mut buf = cstr::buf::dynamic(256);
-                        e.resolve_path(&mut buf).log_ok();
-                        let path = cstr::buf::dynamic(256).join_path(&buf);
-                        self.load_overlay_rc(&path, &buf);
-                        let desc_path = cstr::buf::dynamic(256).join_path(root_dir);
-                        path.copy_to(&desc_path).log_ok();
+        let modules_root = cstr!(concatcp!("/data/", PREINITMIRR));
+        debug!(
+            "handle_modules_rc: modules_root=[{}] root_dir=[{}]",
+            modules_root,
+            root_dir
+        );
+        let mut dir = match Directory::open(modules_root) {
+            Ok(dir) => dir,
+            Err(e) => {
+                warn!("handle_modules_rc: cannot open [{}]: {}", modules_root, e);
+                return;
+            }
+        };
+
+        loop {
+            match dir.read() {
+                Ok(None) => break,
+                Ok(Some(e)) if e.is_dir() => {
+                    let mut buf = cstr::buf::dynamic(256);
+                    e.resolve_path(&mut buf).log_ok();
+                    let path = cstr::buf::dynamic(256).join_path(&buf);
+                    debug!("handle_modules_rc: module dir [{}]", path);
+                    self.load_overlay_rc(&path, &buf);
+                    let desc_path = cstr::buf::dynamic(256).join_path(root_dir);
+                    if let Err(e) = path.copy_to(&desc_path) {
+                        let _ = e;
+                        warn!(
+                            "handle_modules_rc: copy [{}] -> [{}] failed",
+                            path,
+                            desc_path
+                        );
+                    } else {
+                        debug!("handle_modules_rc: copied [{}] -> [{}]", path, desc_path);
                     }
-                    Ok(_) => continue,
-                    Err(_) => break,
+                }
+                Ok(_) => continue,
+                Err(e) => {
+                    warn!("handle_modules_rc: read dir [{}] failed: {}", modules_root, e);
+                    break;
                 }
             }
         }

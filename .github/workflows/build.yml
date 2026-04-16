@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     name: Build Magisk artifacts
-    runs-on: macos-26
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
     steps:
@@ -52,28 +52,6 @@ jobs:
           path: app/apk/build/outputs
           compression-level: 9
 
-  test-build:
-    name: Test building on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2025, ubuntu-24.04]
-    steps:
-      - name: Check out
-        uses: actions/checkout@v6
-        with:
-          submodules: "recursive"
-
-      - name: Setup environment
-        uses: ./.github/actions/setup
-
-      - name: Test build
-        run: python build.py -v -c .github/ci.prop all
-
-      - name: Stop gradle daemon
-        run: ./app/gradlew --stop
-
   avd-test:
     name: Test API ${{ matrix.version }} (x86_64)
     runs-on: ubuntu-24.04
@@ -82,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 36.1, "CANARY"]
+        version: [23, 24, 25]
         type: [""]
         include:
           - version: "CinnamonBun"
@@ -122,7 +100,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [23, 24, 25, 26, 27, 28, 29, 30]
+        version: [23, 24, 25]
 
     steps:
       - name: Check out

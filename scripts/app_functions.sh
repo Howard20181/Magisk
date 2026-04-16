@@ -50,6 +50,7 @@ fix_env() {
   # Cleanup and make dirs
   rm -rf $MAGISKBIN/*
   mkdir -p $MAGISKBIN 2>/dev/null
+  stat /data/adb
   chmod 700 /data/adb
   cp_readlink $1 $MAGISKBIN
   rm -rf $1
